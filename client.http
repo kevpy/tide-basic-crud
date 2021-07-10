@@ -1,0 +1,50 @@
+@baseurl = http://127.0.0.1:8080/
+
+# @name root
+GET {{baseurl}} HTTP/1.1
+content-type: application/json
+
+###
+
+# @name create-dino
+POST {{baseurl}}dinos HTTP/1.1
+content-type: application/json
+# Authorization: {{token}}
+
+{
+    "name":"one", 
+    "weight": 500, 
+    "diet":"carnivorous"
+}
+
+###
+
+# @name get-all-dinos
+GET {{baseurl}}dinos HTTP/1.1
+content-type: application/json
+
+###
+
+# @name get-dino-by-name
+GET {{baseurl}}dinos/t-rex HTTP/1.1
+content-type: application/json
+
+###
+
+# @name update-dino-by-name
+PUT {{baseurl}}dinos/t-rex HTTP/1.1
+content-type: application/json
+
+{
+    "name":"t-rexx", 
+    "weight": 5000, 
+    "diet":"carnivorous"
+}
+
+###
+
+# @name delete-dino-by-name
+DELETE {{baseurl}}dinos/one HTTP/1.1
+content-type: application/json
+
+###

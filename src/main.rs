@@ -19,6 +19,68 @@ struct Dino {
     diet: String,
 }
 
+async fn dinos_create(mut req: Request<State>) -> tide::Result {
+    let dino: Dino = req.body_json().await?;
+    // let get a mut ref of our store ( hashMap )
+    let mut dinos = req.state().dinos.write().await;
+    dinos.insert(String::from(&dino.name), dino.clone());
+    let mut res = Response::new(201);
+    res.set_body(Body::from_json(&dino)?);
+    Ok(res)
+}
+
+async fn dinos_list(req: Request<State>) -> tide::Result {
+    let dinos = req.state().dinos.read().await;
+
+    // get all the dinos as a vector
+    let dinos_vec: Vec<Dino> = dinos.values().cloned().collect();
+    let mut res = Response::new(200);
+    res.set_body(Body::from_json(&dinos_vec)?);
+    Ok(res)
+}
+
+async fn dino_get(req: Request<State>) -> tide::Result {
+    let mut dinos = req.state().dinos.write().await;
+    let key: String = req.param("name")?.to_string();
+    let res = match dinos.entry(key) {
+        Entry::Vacant(_entry) => Response::new(404),
+        Entry::Occupied(entry) => {
+            let mut res = Response::new(200);
+            res.set_body(Body::from_json(&entry.get())?);
+            res
+        }
+    };
+    Ok(res)
+}
+
+async fn dino_update(mut req: Request<State>) -> tide::Result {
+    let dino_update: Dino = req.body_json().await?;
+    let mut dinos = req.state().dinos.write().await;
+    let key: String = req.param("name")?.to_string();
+
+    let res = match dinos.entry(key) {
+        Entry::Vacant(_entry) => Response::new(404),
+        Entry::Occupied(mut entry) => {
+            *entry.get_mut() = dino_update;
+            let mut res = Response::new(200);
+            res.set_body(Body::from_json(&entry.get())?);
+            res
+        }
+    };
+    Ok(res)
+}
+
+async fn dino_delete(req: Request<State>) -> tide::Result {
+    let mut dinos = req.state().dinos.write().await;
+    let key: String = req.param("name")?.to_string();
+    let deleted = dinos.remove(&key);
+    let res = match deleted {
+        None => Response::new(404),
+        Some(_) => Response::new(204),
+    };
+    Ok(res)
+}
+
 #[async_std::main]
 async fn main() {
     tide::log::start();
@@ -36,73 +98,19 @@ async fn server(dinos_store: Arc<RwLock<HashMap<String, Dino>>>) -> Server<State
     // default route
     app.at("/").get(|_| async { Ok("Hello, world!") });
 
-    // post a dino
-    app.at("/dinos").post(|mut req: Request<State>| async move {
-        let dino: Dino = req.body_json().await?;
-
-        // let get a mut ref of our store ( hashMap )
-        let mut dinos = req.state().dinos.write().await;
-        dinos.insert(String::from(&dino.name), dino.clone());
-
-        let mut res = Response::new(201);
-        res.set_body(Body::from_json(&dino)?);
-        Ok(res)
-    });
-
-    // get all dinos
-    app.at("/dinos").get(|req: Request<State>| async move {
-        let dinos = req.state().dinos.read().await;
-
-        // get all the dinos as a vector
-        let dinos_vec: Vec<Dino> = dinos.values().cloned().collect();
-        let mut res = Response::new(200);
-        res.set_body(Body::from_json(&dinos_vec)?);
-        Ok(res)
-    });
+    app.at("/dinos")
+        // post a dino
+        .post(dinos_create)
+        // get all dinos
+        .get(dinos_list);
 
     app.at("/dinos/:name")
         // get a single dino
-        .get(|req: Request<State>| async move {
-            let mut dinos = req.state().dinos.write().await;
-            let key: String = req.param("name")?.to_string();
-            let res = match dinos.entry(key) {
-                Entry::Vacant(_entry) => Response::new(404),
-                Entry::Occupied(entry) => {
-                    let mut res = Response::new(200);
-                    res.set_body(Body::from_json(&entry.get())?);
-                    res
-                }
-            };
-            Ok(res)
-        })
+        .get(dino_get)
         // update a dino
-        .put(|mut req: Request<State>| async move {
-            let dino_update: Dino = req.body_json().await?;
-            let mut dinos = req.state().dinos.write().await;
-            let key: String = req.param("name")?.to_string();
-
-            let res = match dinos.entry(key) {
-                Entry::Vacant(_entry) => Response::new(404),
-                Entry::Occupied(mut entry) => {
-                    *entry.get_mut() = dino_update;
-                    let mut res = Response::new(200);
-                    res.set_body(Body::from_json(&entry.get())?);
-                    res
-                }
-            };
-            Ok(res)
-        })
+        .put(dino_update)
         // delete a dino
-        .delete(|req: Request<State>| async move {
-            let mut dinos = req.state().dinos.write().await;
-            let key: String = req.param("name")?.to_string();
-            let deleted = dinos.remove(&key);
-            let res = match deleted {
-                None => Response::new(404),
-                Some(_) => Response::new(204),
-            };
-            Ok(res)
-        });
+        .delete(dino_delete);
 
     app
 }

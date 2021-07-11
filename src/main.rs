@@ -5,15 +5,32 @@ use std::{
 
 use async_std::sync::RwLock;
 use serde::{Deserialize, Serialize};
-use tide::{Body, Request, Response};
+use tide::{Body, Request, Response, Server};
+
+#[derive(Clone, Debug)]
+struct State {
+    dinos: Arc<RwLock<HashMap<String, Dino>>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Dino {
+    name: String,
+    weight: u16,
+    diet: String,
+}
 
 #[async_std::main]
-async fn main() -> Result<(), std::io::Error> {
-    let state = State {
-        dinos: Default::default(),
-    };
-
+async fn main() {
     tide::log::start();
+    let dinos_store = Default::default();
+    let app = server(dinos_store).await;
+
+    app.listen("127.0.0.1:8080").await.unwrap();
+}
+
+async fn server(dinos_store: Arc<RwLock<HashMap<String, Dino>>>) -> Server<State> {
+    let state = State { dinos: dinos_store };
+
     let mut app = tide::with_state(state);
 
     // default route
@@ -87,20 +104,5 @@ async fn main() -> Result<(), std::io::Error> {
             Ok(res)
         });
 
-    // update a dino
-
-    app.listen("127.0.0.1:8080").await?;
-    Ok(())
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Dino {
-    name: String,
-    weight: u16,
-    diet: String,
-}
-
-#[derive(Clone, Debug)]
-struct State {
-    dinos: Arc<RwLock<HashMap<String, Dino>>>,
+    app
 }

@@ -7,32 +7,32 @@ content-type: application/json
 ###
 
 # @name create-dino
-POST {{baseurl}}dinos HTTP/1.1
+POST {{baseurl}}animals HTTP/1.1
 content-type: application/json
 # Authorization: {{token}}
 
 {
-    "name":"one", 
-    "weight": 500, 
+    "name":"cheetah", 
+    "weight": 200, 
     "diet":"carnivorous"
 }
 
 ###
 
 # @name get-all-dinos
-GET {{baseurl}}dinos HTTP/1.1
+GET {{baseurl}}animals HTTP/1.1
 content-type: application/json
 
 ###
 
 # @name get-dino-by-name
-GET {{baseurl}}dinos/t-rex HTTP/1.1
+GET {{baseurl}}animals/590c11e1-333f-45ae-b073-5e80bf3beaae HTTP/1.1
 content-type: application/json
 
 ###
 
 # @name update-dino-by-name
-PUT {{baseurl}}dinos/t-rex HTTP/1.1
+PUT {{baseurl}}animals/590c11e7-333f-45ae-b073-5e80bf3beaae HTTP/1.1
 content-type: application/json
 
 {
@@ -44,7 +44,7 @@ content-type: application/json
 ###
 
 # @name delete-dino-by-name
-DELETE {{baseurl}}dinos/one HTTP/1.1
+DELETE {{baseurl}}animals/one HTTP/1.1
 content-type: application/json
 
 ###

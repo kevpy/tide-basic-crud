@@ -10,11 +10,18 @@ struct State {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+// struct Animal {
+//     id: Option<Uuid>,
+//     name: Option<String>,
+//     weight: Option<i32>,
+//     diet: Option<String>,
+// }
+
 struct Animal {
-    id: Option<Uuid>,
-    name: Option<String>,
-    weight: Option<i32>,
-    diet: Option<String>,
+    id: Uuid,
+    name: String,
+    weight: i32,
+    diet: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

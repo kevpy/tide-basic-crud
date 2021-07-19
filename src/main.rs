@@ -234,10 +234,10 @@ async fn list_dinos() -> tide::Result<()> {
     use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test")),
-        weight: Some(50),
-        diet: Some(String::from("carnivorous")),
+        id: Uuid::new_v4(),
+        name: String::from("test_list"),
+        weight: 500,
+        diet: String::from("carnivorous"),
     };
 
     let db_pool = make_db_pool().await;
@@ -257,10 +257,10 @@ async fn create_dino() -> tide::Result<()> {
     use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test")),
-        weight: Some(50),
-        diet: Some(String::from("carnivorous")),
+        id: Uuid::new_v4(),
+        name: String::from("test_create"),
+        weight: 500,
+        diet: String::from("carnivorous"),
     };
 
     let db_pool = make_db_pool().await;
@@ -282,10 +282,10 @@ async fn get_dino() -> tide::Result<()> {
     use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test")),
-        weight: Some(50),
-        diet: Some(String::from("carnivorous")),
+        id: Uuid::new_v4(),
+        name: String::from("test_get"),
+        weight: 500,
+        diet: String::from("carnivorous"),
     };
 
     let db_pool = make_db_pool().await;
@@ -307,8 +307,7 @@ async fn get_dino() -> tide::Result<()> {
     // start the server
     let app = server(db_pool).await;
 
-    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id.unwrap()).as_str())
-        .unwrap();
+    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id).as_str()).unwrap();
     let req = Request::new(Method::Get, url);
 
     let res: Response = app.respond(req).await?;
@@ -322,10 +321,10 @@ async fn update_dino() -> tide::Result<()> {
     use tide::http::{Method, Request, Response, Url};
 
     let mut animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test")),
-        weight: Some(50),
-        diet: Some(String::from("carnivorous")),
+        id: Uuid::new_v4(),
+        name: String::from("test_update"),
+        weight: 500,
+        diet: String::from("carnivorous"),
     };
 
     let db_pool = make_db_pool().await;
@@ -345,13 +344,12 @@ async fn update_dino() -> tide::Result<()> {
     .await?;
 
     // change the dino
-    animal.name = Some(String::from("updated from test"));
+    animal.name = String::from("updated from test");
 
     // start the server
     let app = server(db_pool).await;
 
-    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id.unwrap()).as_str())
-        .unwrap();
+    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id).as_str()).unwrap();
     let mut req = Request::new(Method::Put, url);
     let dinos_as_json_string = serde_json::to_string(&animal)?;
     req.set_body(dinos_as_json_string);
@@ -366,10 +364,10 @@ async fn delete_dino() -> tide::Result<()> {
     use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test_delete")),
-        weight: Some(50),
-        diet: Some(String::from("carnivorous")),
+        id: Uuid::new_v4(),
+        name: String::from("test_delete"),
+        weight: 500,
+        diet: String::from("carnivorous"),
     };
 
     let db_pool = make_db_pool().await;
@@ -391,8 +389,7 @@ async fn delete_dino() -> tide::Result<()> {
     // start the server
     let app = server(db_pool).await;
 
-    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id.unwrap()).as_str())
-        .unwrap();
+    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id).as_str()).unwrap();
     let req = Request::new(Method::Delete, url);
     let res: Response = app.respond(req).await?;
     assert_eq!(204, res.status());

@@ -228,32 +228,30 @@ async fn server(db_pool: PgPool) -> Server<State> {
 }
 
 #[async_std::test]
-async fn list_dinos() -> tide::Result<()> {
+async fn list_animals() -> tide::Result<()> {
     dotenv::dotenv().ok();
-    use tide::http::{Method, Request, Response, Url};
 
-    let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test_list")),
-        weight: Some(500),
-        diet: Some(String::from("carnivorous")),
-    };
+    // let animal = Animal {
+    //     id: Some(Uuid::new_v4()),
+    //     name: Some(String::from("test_list")),
+    //     weight: Some(500),
+    //     diet: Some(String::from("carnivorous")),
+    // };
 
     let db_pool = make_db_pool().await;
     let app = server(db_pool).await;
 
-    let url = Url::parse("http://example.com/animals").unwrap();
-    let req = Request::new(Method::Get, url);
-    let res: Response = app.respond(req).await?;
+    let res = surf::Client::with_http_client(app)
+        .get("https://example.com/animals")
+        .await?;
 
     assert_eq!(200, res.status());
     Ok(())
 }
 
 #[async_std::test]
-async fn create_dino() -> tide::Result<()> {
+async fn create_animal() -> tide::Result<()> {
     dotenv::dotenv().ok();
-    use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
         id: Some(Uuid::new_v4()),
@@ -265,10 +263,10 @@ async fn create_dino() -> tide::Result<()> {
     let db_pool = make_db_pool().await;
     let app = server(db_pool).await;
 
-    let url = Url::parse("https://example.com/animals").unwrap();
-    let mut req = Request::new(Method::Post, url);
-    req.set_body(serde_json::to_string(&animal)?);
-    let res: Response = app.respond(req).await?;
+    let res = surf::Client::with_http_client(app)
+        .post("https://example.com/animals")
+        .body(serde_json::to_string(&animal)?)
+        .await?;
 
     assert_eq!(201, res.status());
 
@@ -276,9 +274,8 @@ async fn create_dino() -> tide::Result<()> {
 }
 
 #[async_std::test]
-async fn get_dino() -> tide::Result<()> {
+async fn get_animal() -> tide::Result<()> {
     dotenv::dotenv().ok();
-    use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
         id: Some(Uuid::new_v4()),
@@ -306,19 +303,20 @@ async fn get_dino() -> tide::Result<()> {
     // start the server
     let app = server(db_pool).await;
 
-    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id.unwrap()).as_str())
-        .unwrap();
-    let req = Request::new(Method::Get, url);
+    let res = surf::Client::with_http_client(app)
+        .get(format!(
+            "https://example.com/animals/{}",
+            &animal.id.unwrap()
+        ))
+        .await?;
 
-    let res: Response = app.respond(req).await?;
     assert_eq!(200, res.status());
     Ok(())
 }
 
 #[async_std::test]
-async fn update_dino() -> tide::Result<()> {
+async fn update_animal() -> tide::Result<()> {
     dotenv::dotenv().ok();
-    use tide::http::{Method, Request, Response, Url};
 
     let mut animal = Animal {
         id: Some(Uuid::new_v4()),
@@ -349,20 +347,21 @@ async fn update_dino() -> tide::Result<()> {
     // start the server
     let app = server(db_pool).await;
 
-    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id.unwrap()).as_str())
-        .unwrap();
-    let mut req = Request::new(Method::Put, url);
-    let dinos_as_json_string = serde_json::to_string(&animal)?;
-    req.set_body(dinos_as_json_string);
-    let res: Response = app.respond(req).await?;
+    let res = surf::Client::with_http_client(app)
+        .put(format!(
+            "https://example.com/animals/{}",
+            &animal.id.unwrap()
+        ))
+        .body(serde_json::to_string(&animal)?)
+        .await?;
+
     assert_eq!(200, res.status());
     Ok(())
 }
 
 #[async_std::test]
-async fn delete_dino() -> tide::Result<()> {
+async fn delete_animal() -> tide::Result<()> {
     dotenv::dotenv().ok();
-    use tide::http::{Method, Request, Response, Url};
 
     let animal = Animal {
         id: Some(Uuid::new_v4()),
@@ -390,10 +389,13 @@ async fn delete_dino() -> tide::Result<()> {
     // start the server
     let app = server(db_pool).await;
 
-    let url = Url::parse(format!("https://example.com/animals/{}", &animal.id.unwrap()).as_str())
-        .unwrap();
-    let req = Request::new(Method::Delete, url);
-    let res: Response = app.respond(req).await?;
+    let res = surf::Client::with_http_client(app)
+        .delete(format!(
+            "https://example.com/animals/{}",
+            &animal.id.unwrap()
+        ))
+        .await?;
+
     assert_eq!(204, res.status());
     Ok(())
 }

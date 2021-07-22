@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: [testing]
+    branches: [testing, develop]
   pull_request:
     branches: [main]
 
@@ -41,6 +41,11 @@ jobs:
 
       - name: Build
         run: cargo build
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:${{ job.services.postgres.ports[5432] }}/tide
+
+      - name: Run test
+        run: cargo test --tests
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:${{ job.services.postgres.ports[5432] }}/tide
 

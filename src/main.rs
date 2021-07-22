@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{query, query_as, FromRow, PgPool, Row};
+use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
 use uuid::Uuid;
 
@@ -9,20 +10,22 @@ struct State {
     db_pool: PgPool,
 }
 
+// #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+// struct Animal {
+//     id: Option<Uuid>,
+//     name: Option<String>,
+//     weight: Option<i32>,
+//     diet: Option<String>,
+// }
+
 #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
 struct Animal {
-    id: Option<Uuid>,
-    name: Option<String>,
-    weight: Option<i32>,
-    diet: Option<String>,
+    id: Uuid,
+    name: String,
+    weight: i32,
+    diet: String,
 }
 
-// struct Animal {
-//     id: Uuid,
-//     name: String,
-//     weight: i32,
-//     diet: String,
-// }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct AnimalRequest {
     name: String,
@@ -190,8 +193,7 @@ fn register_rest_entity(app: &mut Server<State>, entity: RestEntity) {
         .delete(RestEntity::delete);
 }
 
-pub async fn make_db_pool() -> PgPool {
-    let db_url = std::env::var("DATABASE_URL").unwrap();
+pub async fn make_db_pool(db_url: &str) -> PgPool {
     PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
@@ -204,10 +206,20 @@ async fn main() {
     dotenv::dotenv().ok();
 
     tide::log::start();
-    let db_pool = make_db_pool().await;
+
+    let db_url = std::env::var("DATABASE_URL").unwrap();
+    let db_pool = make_db_pool(&db_url).await;
     let app = server(db_pool).await;
 
-    app.listen("127.0.0.1:8080").await.unwrap();
+    let mut listener = app
+        .bind("127.0.0.1:8080")
+        .await
+        .expect("can't bind the port");
+
+    for info in listener.info().iter() {
+        println!("Server listening on {}", info);
+    }
+    listener.accept().await.unwrap();
 }
 
 async fn server(db_pool: PgPool) -> Server<State> {
@@ -227,175 +239,216 @@ async fn server(db_pool: PgPool) -> Server<State> {
     app
 }
 
-#[async_std::test]
-async fn list_animals() -> tide::Result<()> {
-    dotenv::dotenv().ok();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lazy_static::lazy_static;
+    use sqlx::query;
 
-    // let animal = Animal {
-    //     id: Some(Uuid::new_v4()),
-    //     name: Some(String::from("test_list")),
-    //     weight: Some(500),
-    //     diet: Some(String::from("carnivorous")),
-    // };
+    lazy_static! {
+        static ref DB_URL: String =
+            std::env::var("DATABASE_URL").expect("missing env var DATABASE_URL");
+    }
 
-    let db_pool = make_db_pool().await;
-    let app = server(db_pool).await;
+    async fn clear_animals() -> Result<(), Box<dyn std::error::Error>> {
+        let db_pool = make_db_pool(&DB_URL).await;
 
-    let res = surf::Client::with_http_client(app)
-        .get("https://example.com/animals")
+        sqlx::query("DELETE FROM animals").execute(&db_pool).await?;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn list_animals() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+        clear_animals()
+            .await
+            .expect("Failed to clear the animals table");
+
+        // let animal = Animal {
+        //     id: Some(Uuid::new_v4()),
+        //     name: Some(String::from("test_list")),
+        //     weight: Some(500),
+        //     diet: Some(String::from("carnivorous")),
+        // };
+
+        let db_pool = make_db_pool(&DB_URL).await;
+        let app = server(db_pool).await;
+
+        let res = surf::Client::with_http_client(app)
+            .get("https://example.com/animals")
+            .await?;
+
+        assert_eq!(200, res.status());
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn create_animal() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+        clear_animals()
+            .await
+            .expect("Failed to clear the animals table");
+
+        use assert_json_diff::assert_json_eq;
+
+        let animal = Animal {
+            id: Uuid::new_v4(),
+            name: String::from("test_create"),
+            weight: 500,
+            diet: String::from("carnivorous"),
+        };
+
+        let db_pool = make_db_pool(&DB_URL).await;
+        let app = server(db_pool).await;
+
+        let mut res = surf::Client::with_http_client(app)
+            .post("https://example.com/animals")
+            .body(serde_json::to_string(&animal)?)
+            .await?;
+
+        assert_eq!(201, res.status());
+
+        let a: Animal = res.body_json().await?;
+        assert_json_eq!(animal.name, a.name);
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn get_animal() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+        clear_animals()
+            .await
+            .expect("Failed to clear the animals table");
+
+        use assert_json_diff::assert_json_eq;
+
+        let animal = Animal {
+            id: Uuid::new_v4(),
+            name: String::from("test_get"),
+            weight: 500,
+            diet: String::from("carnivorous"),
+        };
+
+        let db_pool = make_db_pool(&DB_URL).await;
+
+        // create the dino for get
+        query!(
+            r#"
+            INSERT INTO animals (id, name, weight, diet) VALUES
+            ($1, $2, $3, $4) returning id, name, weight, diet
+            "#,
+            animal.id,
+            animal.name,
+            animal.weight,
+            animal.diet
+        )
+        .fetch_one(&db_pool)
         .await?;
 
-    assert_eq!(200, res.status());
-    Ok(())
-}
+        // start the server
+        let app = server(db_pool).await;
 
-#[async_std::test]
-async fn create_animal() -> tide::Result<()> {
-    dotenv::dotenv().ok();
+        let mut res = surf::Client::with_http_client(app)
+            .get(format!("https://example.com/animals/{}", &animal.id))
+            .await?;
 
-    let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test_create")),
-        weight: Some(500),
-        diet: Some(String::from("carnivorous")),
-    };
+        assert_eq!(200, res.status());
 
-    let db_pool = make_db_pool().await;
-    let app = server(db_pool).await;
+        let a: Animal = res.body_json().await?;
+        assert_json_eq!(animal, a);
+        Ok(())
+    }
 
-    let res = surf::Client::with_http_client(app)
-        .post("https://example.com/animals")
-        .body(serde_json::to_string(&animal)?)
+    #[async_std::test]
+    async fn update_animal() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+        clear_animals()
+            .await
+            .expect("Failed to clear the animals table");
+
+        use assert_json_diff::assert_json_eq;
+
+        let mut animal = Animal {
+            id: Uuid::new_v4(),
+            name: String::from("test_get"),
+            weight: 500,
+            diet: String::from("carnivorous"),
+        };
+
+        let db_pool = make_db_pool(&DB_URL).await;
+
+        // create the dino for update
+        query!(
+            r#"
+            INSERT INTO animals (id, name, weight, diet) VALUES
+            ($1, $2, $3, $4) returning id, name, weight, diet
+            "#,
+            animal.id,
+            animal.name,
+            animal.weight,
+            animal.diet
+        )
+        .fetch_one(&db_pool)
         .await?;
 
-    assert_eq!(201, res.status());
+        // change the animal
+        animal.name = String::from("updated from test");
 
-    Ok(())
-}
+        // start the server
+        let app = server(db_pool).await;
 
-#[async_std::test]
-async fn get_animal() -> tide::Result<()> {
-    dotenv::dotenv().ok();
+        let mut res = surf::Client::with_http_client(app)
+            .put(format!("https://example.com/animals/{}", &animal.id))
+            .body(serde_json::to_string(&animal)?)
+            .await?;
 
-    let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test_get")),
-        weight: Some(500),
-        diet: Some(String::from("carnivorous")),
-    };
+        assert_eq!(200, res.status());
 
-    let db_pool = make_db_pool().await;
+        let a: Animal = res.body_json().await?;
+        assert_json_eq!(animal, a);
 
-    // create the dino for get
-    query!(
-        r#"
-        INSERT INTO animals (id, name, weight, diet) VALUES
-        ($1, $2, $3, $4) returning id, name, weight, diet
-        "#,
-        animal.id,
-        animal.name,
-        animal.weight,
-        animal.diet
-    )
-    .fetch_one(&db_pool)
-    .await?;
+        Ok(())
+    }
 
-    // start the server
-    let app = server(db_pool).await;
+    #[async_std::test]
+    async fn delete_animal() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+        clear_animals()
+            .await
+            .expect("Failed to clear the animals table");
 
-    let res = surf::Client::with_http_client(app)
-        .get(format!(
-            "https://example.com/animals/{}",
-            &animal.id.unwrap()
-        ))
+        let animal = Animal {
+            id: Uuid::new_v4(),
+            name: String::from("test_get"),
+            weight: 500,
+            diet: String::from("carnivorous"),
+        };
+
+        let db_pool = make_db_pool(&DB_URL).await;
+
+        // create the dino for delete
+        query!(
+            r#"
+            INSERT INTO animals (id, name, weight, diet) VALUES
+            ($1, $2, $3, $4) returning id, name, weight, diet
+            "#,
+            animal.id,
+            animal.name,
+            animal.weight,
+            animal.diet
+        )
+        .fetch_one(&db_pool)
         .await?;
 
-    assert_eq!(200, res.status());
-    Ok(())
-}
+        // start the server
+        let app = server(db_pool).await;
 
-#[async_std::test]
-async fn update_animal() -> tide::Result<()> {
-    dotenv::dotenv().ok();
+        let res = surf::Client::with_http_client(app)
+            .delete(format!("https://example.com/animals/{}", &animal.id))
+            .await?;
 
-    let mut animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test_update")),
-        weight: Some(500),
-        diet: Some(String::from("carnivorous")),
-    };
-
-    let db_pool = make_db_pool().await;
-
-    // create the dino for update
-    query!(
-        r#"
-        INSERT INTO animals (id, name, weight, diet) VALUES
-        ($1, $2, $3, $4) returning id, name, weight, diet
-        "#,
-        animal.id,
-        animal.name,
-        animal.weight,
-        animal.diet
-    )
-    .fetch_one(&db_pool)
-    .await?;
-
-    // change the animal
-    animal.name = Some(String::from("updated from test"));
-
-    // start the server
-    let app = server(db_pool).await;
-
-    let res = surf::Client::with_http_client(app)
-        .put(format!(
-            "https://example.com/animals/{}",
-            &animal.id.unwrap()
-        ))
-        .body(serde_json::to_string(&animal)?)
-        .await?;
-
-    assert_eq!(200, res.status());
-    Ok(())
-}
-
-#[async_std::test]
-async fn delete_animal() -> tide::Result<()> {
-    dotenv::dotenv().ok();
-
-    let animal = Animal {
-        id: Some(Uuid::new_v4()),
-        name: Some(String::from("test_delete")),
-        weight: Some(500),
-        diet: Some(String::from("carnivorous")),
-    };
-
-    let db_pool = make_db_pool().await;
-
-    // create the dino for delete
-    query!(
-        r#"
-        INSERT INTO animals (id, name, weight, diet) VALUES
-        ($1, $2, $3, $4) returning id, name, weight, diet
-        "#,
-        animal.id,
-        animal.name,
-        animal.weight,
-        animal.diet
-    )
-    .fetch_one(&db_pool)
-    .await?;
-
-    // start the server
-    let app = server(db_pool).await;
-
-    let res = surf::Client::with_http_client(app)
-        .delete(format!(
-            "https://example.com/animals/{}",
-            &animal.id.unwrap()
-        ))
-        .await?;
-
-    assert_eq!(204, res.status());
-    Ok(())
+        assert_eq!(204, res.status());
+        Ok(())
+    }
 }

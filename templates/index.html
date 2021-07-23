@@ -1,0 +1,45 @@
+{% extends "layout.html" %} {% block title %} {{title}} {% endblock title %} {%
+block content %} {% if animals %}
+<table class="u-full-width">
+  <thead>
+    <tr>
+      <th>Id</th>
+      <th>Name</th>
+      <th>Weight</th>
+      <th>Diet</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for animal in animals %}
+    <tr>
+      <td>{{animal.id}}</td>
+      <td>{{animal.name}}</td>
+      <td>{{animal.weight}}</td>
+      <td>{{animal.diet}}</td>
+      <td><a href="/animals/{{animal.id}}/edit"> Edit </a></td>
+      <td><a class="delete" data-id="{{animal.id}}" href="#"> Delete </a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<a href="/animals/new">Create new Animal</a>
+{% endblock content %} {% block aditionalScripts %}
+<script>
+  const links = document.querySelectorAll(".delete");
+
+  for (const link of links) {
+    link.addEventListener("click", function (event) {
+      event.preventDefault();
+      const data = { id: link.dataset.id };
+      api("DELETE", data)
+        .then((res) => {
+          // just reload home
+          window.location.href = "/";
+        })
+        .catch(alert);
+    });
+  }
+</script>
+{% endblock aditionalScripts %}

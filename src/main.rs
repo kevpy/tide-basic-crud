@@ -1,13 +1,16 @@
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{query, query_as, FromRow, PgPool, Row};
+use tera::Tera;
 use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
+use tide_tera::prelude::*;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 struct State {
     db_pool: PgPool,
+    tera: Tera,
 }
 
 // #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
@@ -130,8 +133,9 @@ impl RestEntity {
     }
 
     async fn update(mut req: tide::Request<State>) -> tide::Result {
-        let animal: Animal = req.body_json().await?;
+        let animal: AnimalRequest = req.body_json().await?;
         let db_pool = req.state().db_pool.clone();
+        println!("------> {:?}", &req.param("id"));
         let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
         let row = query_as!(
             Animal,
@@ -223,18 +227,94 @@ async fn main() {
 }
 
 async fn server(db_pool: PgPool) -> Server<State> {
-    let state = State { db_pool };
+    let mut tera = Tera::new("templates/**/*").expect("Error parsing templates directory");
+    tera.autoescape_on(vec!["html"]);
+
+    let state = State { db_pool, tera };
 
     let mut app = tide::with_state(state);
 
     // default route
-    app.at("/").get(|_| async { Ok("ok") });
+    app.at("/").get(|req: tide::Request<State>| async move {
+        let tera = req.state().tera.clone();
+        let db_pool = req.state().db_pool.clone();
+        let rows = query_as!(
+            Animal,
+            r#"
+                SELECT id, name, weight, diet from animals
+            "#
+        )
+        .fetch_all(&db_pool)
+        .await?;
 
-    let dinos_endpoint = RestEntity {
+        tera.render_response(
+            "index.html",
+            &context! {
+                "title" => String::from("Tide basic CRUD"),
+                "animals" => rows,
+            },
+        )
+    });
+
+    // new dino
+    app.at("/animals/new")
+        .get(|req: tide::Request<State>| async move {
+            let tera = req.state().tera.clone();
+
+            tera.render_response(
+                "form.html",
+                &context! {
+                   "title" => String::from("Create new animal")
+                },
+            )
+        });
+
+    // edit animal
+    app.at("/animals/:id/edit")
+        .get(|req: tide::Request<State>| async move {
+            let tera = req.state().tera.clone();
+            let db_pool = req.state().db_pool.clone();
+            let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
+            let row = query_as!(
+                Animal,
+                r#"
+                    SELECT  id, name, weight, diet from animals
+                    WHERE id = $1
+                "#,
+                id
+            )
+            .fetch_optional(&db_pool)
+            .await?;
+
+            let res = match row {
+                None => Response::new(404),
+                Some(row) => {
+                    let mut r = Response::new(200);
+                    let b = tera.render_body(
+                        "form.html",
+                        &context! {
+                            "title" => String::from("Edit animal"),
+                            "animal" => row
+                        },
+                    )?;
+                    r.set_body(b);
+                    r
+                }
+            };
+
+            Ok(res)
+        });
+
+    let animals_endpoint = RestEntity {
         base_path: String::from("/animals"),
     };
 
-    register_rest_entity(&mut app, dinos_endpoint);
+    register_rest_entity(&mut app, animals_endpoint);
+
+    // serve static files
+    app.at("/public")
+        .serve_dir("./public")
+        .expect("Invalid static file directory");
 
     app
 }

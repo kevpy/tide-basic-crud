@@ -3,7 +3,7 @@ use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{query, query_as, FromRow, PgPool, Row};
 use tera::Tera;
 use tide::listener::Listener;
-use tide::{Body, Request, Response, Server};
+use tide::{Body, Error, Request, Response, Server};
 use tide_tera::prelude::*;
 use uuid::Uuid;
 
@@ -42,19 +42,19 @@ struct RestEntity {
 
 impl RestEntity {
     async fn create(mut req: Request<State>) -> tide::Result {
-        let dino: AnimalRequest = req.body_json().await?;
+        let dino: Animal = req.body_json().await?;
 
         let db_pool = req.state().db_pool.clone();
 
-        let row = query(
+        let row: Animal = match query(
             r#"
-            INSERT INTO animals (name, weight, diet) 
+            INSERT INTO animals (id, name, weight, diet) 
                 VALUES
-                ($1, $2, $3) 
+                ($1, $2, $3, $4) 
             returning id, name, weight, diet
             "#,
         )
-        // .bind(&dino.id)
+        .bind(&dino.id)
         .bind(&dino.name)
         .bind(&dino.weight)
         .bind(&dino.diet)
@@ -65,7 +65,14 @@ impl RestEntity {
             diet: row.get(3),
         })
         .fetch_one(&db_pool)
-        .await?;
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let err = Error::new(409, e);
+                return Err(err);
+            }
+        };
 
         let mut res = Response::new(201);
         res.set_body(Body::from_json(&row)?);
@@ -135,7 +142,6 @@ impl RestEntity {
     async fn update(mut req: tide::Request<State>) -> tide::Result {
         let animal: AnimalRequest = req.body_json().await?;
         let db_pool = req.state().db_pool.clone();
-        println!("------> {:?}", &req.param("id"));
         let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
         let row = query_as!(
             Animal,
@@ -337,19 +343,21 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn clear() {
+        dotenv::dotenv().ok();
+        async_std::task::block_on(async {
+            clear_animals().await.unwrap();
+            ()
+        })
+    }
+
     #[async_std::test]
     async fn list_animals() -> tide::Result<()> {
         dotenv::dotenv().ok();
-        clear_animals()
-            .await
-            .expect("Failed to clear the animals table");
-
-        // let animal = Animal {
-        //     id: Some(Uuid::new_v4()),
-        //     name: Some(String::from("test_list")),
-        //     weight: Some(500),
-        //     diet: Some(String::from("carnivorous")),
-        // };
+        // clear_animals()
+        //     .await
+        //     .expect("Failed to clear the animals table");
 
         let db_pool = make_db_pool(&DB_URL).await;
         let app = server(db_pool).await;
@@ -365,9 +373,6 @@ mod tests {
     #[async_std::test]
     async fn create_animal() -> tide::Result<()> {
         dotenv::dotenv().ok();
-        clear_animals()
-            .await
-            .expect("Failed to clear the animals table");
 
         use assert_json_diff::assert_json_eq;
 
@@ -395,11 +400,53 @@ mod tests {
     }
 
     #[async_std::test]
+    async fn create_animal_with_existing_id() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+
+        let animal = Animal {
+            id: Uuid::new_v4(),
+            name: String::from("test_existing_id"),
+            weight: 500,
+            diet: String::from("carnivorous"),
+        };
+
+        let db_pool = make_db_pool(&DB_URL).await;
+
+        // create the animal
+        query!(
+            r#"
+            INSERT INTO animals (id, name, weight, diet) VALUES
+            ($1, $2, $3, $4) returning id, name, weight, diet
+            "#,
+            animal.id,
+            animal.name,
+            animal.weight,
+            animal.diet
+        )
+        .fetch_one(&db_pool)
+        .await?;
+
+        // start the server
+        let app = server(db_pool).await;
+
+        let res = surf::Client::with_http_client(app.clone())
+            .post("https://example.com/animals")
+            .body(serde_json::to_string(&animal)?)
+            .await?;
+
+        // let res1 = surf::Client::with_http_client(app)
+        //     .post("https://example.com/animals")
+        //     .body(serde_json::to_string(&animal)?)
+        //     .await?;
+
+        assert_eq!(409, res.status());
+
+        Ok(())
+    }
+
+    #[async_std::test]
     async fn get_animal() -> tide::Result<()> {
         dotenv::dotenv().ok();
-        clear_animals()
-            .await
-            .expect("Failed to clear the animals table");
 
         use assert_json_diff::assert_json_eq;
 
@@ -441,11 +488,25 @@ mod tests {
     }
 
     #[async_std::test]
+    async fn get_animal_non_existing_id() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+
+        // start the server
+        let db_pool = make_db_pool(&DB_URL).await;
+        let app = server(db_pool).await;
+
+        let res = surf::Client::with_http_client(app)
+            .get(format!("https://example.com/animals/{}", &Uuid::new_v4()))
+            .await?;
+
+        assert_eq!(404, res.status());
+
+        Ok(())
+    }
+
+    #[async_std::test]
     async fn update_animal() -> tide::Result<()> {
         dotenv::dotenv().ok();
-        clear_animals()
-            .await
-            .expect("Failed to clear the animals table");
 
         use assert_json_diff::assert_json_eq;
 
@@ -492,11 +553,33 @@ mod tests {
     }
 
     #[async_std::test]
+    async fn updatet_animal_non_existing_id() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+
+        let animal = Animal {
+            id: Uuid::new_v4(),
+            name: String::from("test_update"),
+            weight: 500,
+            diet: String::from("carnivorous"),
+        };
+
+        // start the server
+        let db_pool = make_db_pool(&DB_URL).await;
+        let app = server(db_pool).await;
+
+        let res = surf::Client::with_http_client(app)
+            .put(format!("https://example.com/animals/{}", &animal.id))
+            .body(serde_json::to_string(&animal)?)
+            .await?;
+
+        assert_eq!(404, res.status());
+
+        Ok(())
+    }
+
+    #[async_std::test]
     async fn delete_animal() -> tide::Result<()> {
         dotenv::dotenv().ok();
-        clear_animals()
-            .await
-            .expect("Failed to clear the animals table");
 
         let animal = Animal {
             id: Uuid::new_v4(),
@@ -529,6 +612,23 @@ mod tests {
             .await?;
 
         assert_eq!(204, res.status());
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn delete_animal_non_existing_id() -> tide::Result<()> {
+        dotenv::dotenv().ok();
+
+        // start the server
+        let db_pool = make_db_pool(&DB_URL).await;
+        let app = server(db_pool).await;
+
+        let res = surf::Client::with_http_client(app)
+            .delete(format!("https://example.com/animals/{}", &Uuid::new_v4()))
+            .await?;
+
+        assert_eq!(404, res.status());
+
         Ok(())
     }
 }

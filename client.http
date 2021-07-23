@@ -12,6 +12,7 @@ content-type: application/json
 # Authorization: {{token}}
 
 {
+    "id": "590c11e1-333f-45ae-b073-5e80bf3beaae",
     "name":"cheetah", 
     "weight": 200, 
     "diet":"carnivorous"

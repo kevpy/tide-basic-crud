@@ -1,28 +1,26 @@
 use serde::{Deserialize, Serialize};
-use sqlx::postgres::{PgPoolOptions, PgRow};
-use sqlx::{query, query_as, FromRow, PgPool, Row};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 use tera::Tera;
 use tide::listener::Listener;
-use tide::{Body, Error, Request, Response, Server};
+use tide::{Error, Server};
 use tide_tera::prelude::*;
 use uuid::Uuid;
 
+mod controllers;
+mod handlers;
+
+use controllers::animal;
+use controllers::views;
+
 #[derive(Clone, Debug)]
-struct State {
+pub struct State {
     db_pool: PgPool,
     tera: Tera,
 }
 
-// #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
-// struct Animal {
-//     id: Option<Uuid>,
-//     name: Option<String>,
-//     weight: Option<i32>,
-//     diet: Option<String>,
-// }
-
-#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
-struct Animal {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Animal {
     id: Uuid,
     name: String,
     weight: i32,
@@ -34,173 +32,6 @@ struct AnimalRequest {
     name: String,
     weight: i32,
     diet: String,
-}
-
-struct RestEntity {
-    base_path: String,
-}
-
-impl RestEntity {
-    async fn create(mut req: Request<State>) -> tide::Result {
-        let dino: Animal = req.body_json().await?;
-
-        let db_pool = req.state().db_pool.clone();
-
-        let row: Animal = match query(
-            r#"
-            INSERT INTO animals (id, name, weight, diet) 
-                VALUES
-                ($1, $2, $3, $4) 
-            returning id, name, weight, diet
-            "#,
-        )
-        .bind(&dino.id)
-        .bind(&dino.name)
-        .bind(&dino.weight)
-        .bind(&dino.diet)
-        .map(|row: PgRow| Animal {
-            id: row.get(0),
-            name: row.get(1),
-            weight: row.get(2),
-            diet: row.get(3),
-        })
-        .fetch_one(&db_pool)
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                let err = Error::new(409, e);
-                return Err(err);
-            }
-        };
-
-        let mut res = Response::new(201);
-        res.set_body(Body::from_json(&row)?);
-        Ok(res)
-    }
-
-    async fn list(req: tide::Request<State>) -> tide::Result {
-        let mut animals = vec![];
-
-        let db_pool = req.state().db_pool.clone();
-
-        let rows = query(
-            r#"
-                SELECT id, name, weight, diet
-                    FROM animals
-                ORDER BY weight
-            "#,
-        )
-        .fetch_all(&db_pool)
-        .await?;
-
-        for row in rows {
-            animals.push(Animal {
-                id: row.get(0),
-                name: row.get(1),
-                weight: row.get(2),
-                diet: row.get(3),
-            });
-        }
-
-        let mut res = Response::new(200);
-        res.set_body(Body::from_json(&animals)?);
-        Ok(res)
-    }
-
-    async fn get(req: tide::Request<State>) -> tide::Result {
-        let db_pool = req.state().db_pool.clone();
-        let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
-
-        let row = query_as!(
-            Animal,
-            r#"
-            SELECT  id, name, weight, diet from animals
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(&db_pool)
-        .await?;
-
-        let res = match row {
-            None => {
-                let mut r = Response::new(404);
-                r.set_body(Body::from_string("Animal not found".to_string()));
-                r
-            }
-            Some(row) => {
-                let mut r = Response::new(200);
-                r.set_body(Body::from_json(&row)?);
-                r
-            }
-        };
-
-        Ok(res)
-    }
-
-    async fn update(mut req: tide::Request<State>) -> tide::Result {
-        let animal: AnimalRequest = req.body_json().await?;
-        let db_pool = req.state().db_pool.clone();
-        let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
-        let row = query_as!(
-            Animal,
-            r#"
-            UPDATE animals SET name = $2, weight = $3, diet = $4
-                WHERE id = $1
-            returning id, name, weight, diet
-            "#,
-            id,
-            animal.name,
-            animal.weight,
-            animal.diet
-        )
-        .fetch_optional(&db_pool)
-        .await?;
-
-        let res = match row {
-            None => Response::new(404),
-            Some(row) => {
-                let mut r = Response::new(200);
-                r.set_body(Body::from_json(&row)?);
-                r
-            }
-        };
-
-        Ok(res)
-    }
-
-    async fn delete(req: Request<State>) -> tide::Result {
-        let db_pool = req.state().db_pool.clone();
-        let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
-        let row = query!(
-            r#"
-            delete from animals
-                WHERE id = $1
-            returning id
-            "#,
-            id
-        )
-        .fetch_optional(&db_pool)
-        .await?;
-
-        let res = match row {
-            None => Response::new(404),
-            Some(_) => Response::new(204),
-        };
-        Ok(res)
-    }
-}
-
-fn register_rest_entity(app: &mut Server<State>, entity: RestEntity) {
-    app.at(&entity.base_path)
-        .get(RestEntity::list)
-        .post(RestEntity::create);
-
-    app.at(&format!("{}/:id", entity.base_path))
-        .get(RestEntity::get)
-        .put(RestEntity::update)
-        .delete(RestEntity::delete);
 }
 
 pub async fn make_db_pool(db_url: &str) -> PgPool {
@@ -240,82 +71,18 @@ async fn server(db_pool: PgPool) -> Server<State> {
 
     let mut app = tide::with_state(state);
 
-    // default route
-    app.at("/").get(|req: tide::Request<State>| async move {
-        let tera = req.state().tera.clone();
-        let db_pool = req.state().db_pool.clone();
-        let rows = query_as!(
-            Animal,
-            r#"
-                SELECT id, name, weight, diet from animals
-            "#
-        )
-        .fetch_all(&db_pool)
-        .await?;
+    // views
+    app.at("/").get(views::index);
+    app.at("/animals/new").get(views::new);
+    app.at("/animals/:id/edit").get(views::edit);
 
-        tera.render_response(
-            "index.html",
-            &context! {
-                "title" => String::from("Tide basic CRUD"),
-                "animals" => rows,
-            },
-        )
-    });
+    // api
+    app.at("/animals").get(animal::list).post(animal::create);
 
-    // new dino
-    app.at("/animals/new")
-        .get(|req: tide::Request<State>| async move {
-            let tera = req.state().tera.clone();
-
-            tera.render_response(
-                "form.html",
-                &context! {
-                   "title" => String::from("Create new animal")
-                },
-            )
-        });
-
-    // edit animal
-    app.at("/animals/:id/edit")
-        .get(|req: tide::Request<State>| async move {
-            let tera = req.state().tera.clone();
-            let db_pool = req.state().db_pool.clone();
-            let id: Uuid = Uuid::parse_str(req.param("id")?).unwrap();
-            let row = query_as!(
-                Animal,
-                r#"
-                    SELECT  id, name, weight, diet from animals
-                    WHERE id = $1
-                "#,
-                id
-            )
-            .fetch_optional(&db_pool)
-            .await?;
-
-            let res = match row {
-                None => Response::new(404),
-                Some(row) => {
-                    let mut r = Response::new(200);
-                    let b = tera.render_body(
-                        "form.html",
-                        &context! {
-                            "title" => String::from("Edit animal"),
-                            "animal" => row
-                        },
-                    )?;
-                    r.set_body(b);
-                    r
-                }
-            };
-
-            Ok(res)
-        });
-
-    let animals_endpoint = RestEntity {
-        base_path: String::from("/animals"),
-    };
-
-    register_rest_entity(&mut app, animals_endpoint);
+    app.at("animals/:id")
+        .get(animal::get)
+        .put(animal::update)
+        .delete(animal::delete);
 
     // serve static files
     app.at("/public")
